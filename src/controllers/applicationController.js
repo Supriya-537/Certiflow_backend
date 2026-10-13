@@ -2,6 +2,18 @@ import Application from '../models/Application.js';
 import ApplicationEvent from '../models/ApplicationEvent.js';
 import Notification from '../models/Notification.js';
 import { canTransitionApplication, buildReferenceNumber } from '../utils/applicationFlow.js';
+import path from 'node:path';
+import { uploadDirectory } from '../middleware/upload.js';
+
+const parseFormObject = (value) => {
+  if (!value) return {};
+  if (typeof value !== 'string') return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+};
 
 export const createApplication = async (req, res) => {
   const { certificateType, applicantDetails, certDetails, supportingDocuments } = req.body;
@@ -10,17 +22,59 @@ export const createApplication = async (req, res) => {
     return res.status(400).json({ message: 'Certificate type is required.' });
   }
 
+  const parsedApplicantDetails = parseFormObject(applicantDetails);
+  const parsedCertDetails = parseFormObject(certDetails);
+  if (!parsedApplicantDetails || !parsedCertDetails) {
+    return res.status(400).json({ message: 'Applicant and certificate details must be valid form data.' });
+  }
+
+  const uploadedDocuments = (req.files || []).map((file) => ({
+    name: path.parse(file.originalname).name,
+    originalName: file.originalname,
+    mimeType: file.mimetype,
+    size: file.size,
+    filePath: file.filename,
+  }));
+
   const application = await Application.create({
     referenceNumber: buildReferenceNumber(),
     citizen: req.user._id,
     certificateType,
-    applicantDetails: applicantDetails || {},
-    certDetails: certDetails || {},
-    supportingDocuments: supportingDocuments || [],
+    applicantDetails: parsedApplicantDetails,
+    certDetails: parsedCertDetails,
+    supportingDocuments: uploadedDocuments.length ? uploadedDocuments : supportingDocuments || [],
     currentStatus: 'DRAFT',
   });
 
   return res.status(201).json({ application });
+};
+
+export const downloadApplicationDocument = async (req, res, next) => {
+  const application = await Application.findById(req.params.id);
+  if (!application) {
+    return res.status(404).json({ message: 'Application not found.' });
+  }
+
+  const isCitizenOwner = req.user.role === 'citizen'
+    && application.citizen.toString() === req.user._id.toString();
+  const isAssignedOfficer = req.user.role === 'officer'
+    && application.assignedOfficer?.toString() === req.user._id.toString();
+  if (!isCitizenOwner && !isAssignedOfficer && req.user.role !== 'admin') {
+    return res.status(403).json({ message: 'You are not allowed to access this document.' });
+  }
+
+  const document = application.supportingDocuments.find((item) => item.filePath === req.params.filename);
+  if (!document) {
+    return res.status(404).json({ message: 'Document not found.' });
+  }
+
+  return res.download(
+    path.join(uploadDirectory, path.basename(document.filePath)),
+    document.originalName,
+    (error) => {
+      if (error && !res.headersSent) next(error);
+    }
+  );
 };
 
 export const listApplications = async (req, res) => {

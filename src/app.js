@@ -44,8 +44,15 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/notifications', notificationRoutes);
 
 app.use((err, req, res, next) => {
-  console.error(err);
-  res.status(500).json({ message: 'Something went wrong on the server.' });
+  const statusCode = err.code === 'LIMIT_FILE_SIZE'
+    ? 413
+    : err.code?.startsWith('LIMIT_')
+      ? 400
+      : err.status || err.statusCode || 500;
+  if (statusCode >= 500) console.error(err);
+  res.status(statusCode).json({
+    message: statusCode < 500 ? err.message : 'Something went wrong on the server.',
+  });
 });
 
 export default app;
