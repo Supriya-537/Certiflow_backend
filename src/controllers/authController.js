@@ -2,10 +2,15 @@ import User from '../models/User.js';
 import { hashPassword, comparePassword, signToken } from '../utils/auth.js';
 
 export const registerCitizen = async (req, res) => {
-  const { name, email, password, phone, address } = req.body;
+  const { name, email, password, phone, address, role = 'citizen' } = req.body;
+  const validRoles = ['citizen', 'officer', 'admin'];
 
   if (!name || !email || !password) {
     return res.status(400).json({ message: 'Name, email, and password are required.' });
+  }
+
+  if (!validRoles.includes(role)) {
+    return res.status(400).json({ message: 'Choose a valid account role.' });
   }
 
   const existing = await User.findOne({ email: email.toLowerCase() });
@@ -19,7 +24,7 @@ export const registerCitizen = async (req, res) => {
     phone: phone || '',
     address: address || '',
     passwordHash: await hashPassword(password),
-    role: 'citizen',
+    role,
     status: 'active',
   });
 
