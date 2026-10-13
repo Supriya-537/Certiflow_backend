@@ -2,31 +2,44 @@ import User from '../models/User.js';
 import { hashPassword, comparePassword, signToken } from '../utils/auth.js';
 
 export const registerCitizen = async (req, res) => {
-  const { name, email, password, phone, address, role = 'citizen' } = req.body;
-  const validRoles = ['citizen', 'officer', 'admin'];
+  const { name, email, password, phone, address } = req.body;
+  const normalizedName = typeof name === 'string' ? name.trim() : '';
+  const normalizedEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
 
-  if (!name || !email || !password) {
+  if (!normalizedName || !normalizedEmail || typeof password !== 'string' || !password) {
     return res.status(400).json({ message: 'Name, email, and password are required.' });
   }
 
-  if (!validRoles.includes(role)) {
-    return res.status(400).json({ message: 'Choose a valid account role.' });
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+    return res.status(400).json({ message: 'Enter a valid email address.' });
   }
 
-  const existing = await User.findOne({ email: email.toLowerCase() });
+  if (password.length < 8) {
+    return res.status(400).json({ message: 'Password must be at least 8 characters long.' });
+  }
+
+  const existing = await User.findOne({ email: normalizedEmail });
   if (existing) {
     return res.status(409).json({ message: 'An account with this email already exists.' });
   }
 
-  const user = await User.create({
-    name,
-    email: email.toLowerCase(),
-    phone: phone || '',
-    address: address || '',
-    passwordHash: await hashPassword(password),
-    role,
-    status: 'active',
-  });
+  let user;
+  try {
+    user = await User.create({
+      name: normalizedName,
+      email: normalizedEmail,
+      phone: phone || '',
+      address: address || '',
+      passwordHash: await hashPassword(password),
+      role: 'citizen',
+      status: 'active',
+    });
+  } catch (error) {
+    if (error.code === 11000) {
+      return res.status(409).json({ message: 'An account with this email already exists.' });
+    }
+    throw error;
+  }
 
   const token = signToken(user);
 
